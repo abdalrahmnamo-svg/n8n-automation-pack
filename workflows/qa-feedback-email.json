@@ -1,0 +1,151 @@
+{
+  "name": "QA Feedback Email",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## QA Feedback Email\nWebhook (Header Auth) receives a scored-interaction payload, the Code node finalises the email text, then the email goes to the local SMTP catcher and a record goes to the local mock API with an Idempotency-Key.",
+        "height": 200,
+        "width": 420
+      },
+      "id": "e9e42038-ab83-4f97-b73b-fb28f5ca381f",
+      "name": "Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1020,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "3d2f670e-c765-48dd-841b-e5c92d6b2f32",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "54e409bd-c8b4-4f18-928b-c5b479a8b15d",
+      "name": "Receive feedback",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1000,
+        300
+      ],
+      "webhookId": "3d2f670e-c765-48dd-841b-e5c92d6b2f32",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Header Auth (demo)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Normalize the webhook payload and assemble the final feedback email.\nconst b = $input.item.json.body || $input.item.json;\nif (!b.agentEmail) throw new Error('agentEmail is required');\nif (!b.conversationId) throw new Error('conversationId is required');\n\nconst contactName = b.contact || 'N/A';\nlet emailContent = String(b.emailContent || '');\nif (emailContent) {\n  emailContent = emailContent\n    .replace(/- Customer Name:[^\\n\\r]*/g, `- Customer Name: ${contactName}`)\n    .replace(/(\\n*)Guidelines:/g, '\\n\\nGuidelines:');\n}\n\n// Light cleanup only: the supervisor's wording is preserved.\nconst feedbackText = String(b.comments || '').trim();\nlet cleaned = feedbackText.replace(/!+/g, '!').replace(/\\s+/g, ' ').trim();\nif (cleaned) {\n  cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);\n  if (!/[.!?]$/.test(cleaned)) cleaned += '.';\n}\nif (emailContent && feedbackText && cleaned !== feedbackText) {\n  emailContent = emailContent.split(feedbackText).join(cleaned);\n}\n\n// Rule-based type, used for the record only.\nconst lower = feedbackText.toLowerCase();\nlet feedbackType = 'verbatim';\nif (/\\b(warning|serious|policy violation|repeated)\\b/i.test(feedbackText)) {\n  feedbackType = 'warning';\n} else if (/\\b(however|make sure|should|consider|improve|next time|please|recommend)\\b/i.test(lower)) {\n  feedbackType = 'corrective';\n} else if (\n  /\\b(perfect|outstanding|great job|good job|well done|keep it up)\\b/i.test(lower) &&\n  !/\\b(however|but|although)\\b/i.test(lower)\n) {\n  feedbackType = 'positive';\n}\n\nreturn {\n  json: {\n    agent: b.agent || 'Agent',\n    agentEmail: b.agentEmail,\n    conversationId: b.conversationId,\n    contact: b.contact || '',\n    phone: b.phone || 'N/A',\n    date: b.date || '',\n    totalScore: b.totalScore ?? 0,\n    passed: b.passed ?? false,\n    scoredBy: b.scoredBy || '',\n    comments: b.comments || '',\n    feedbackType,\n    emailSubject: `Quality feedback - ${b.agent || 'Agent'}`,\n    finalEmailBody: emailContent,\n    idempotencyKey: `feedback:${b.conversationId}`,\n    receivedAt: new Date().toISOString(),\n  },\n};\n"
+      },
+      "id": "595857f1-c6ab-4b68-b234-66bc348f63e8",
+      "name": "Build feedback email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "qa-team@example.com",
+        "emailFormat": "text",
+        "options": {
+          "ccEmail": "qa-lead@example.com"
+        },
+        "toEmail": "={{ $json.agentEmail }}",
+        "subject": "={{ $json.emailSubject }}",
+        "text": "={{ $json.finalEmailBody }}"
+      },
+      "id": "f8ee9402-af5e-4e58-8715-a3e53e59d587",
+      "name": "Send feedback email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -420,
+        200
+      ],
+      "credentials": {
+        "smtp": {
+          "name": "SMTP (demo)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:4010/api/feedback-records",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $json.idempotencyKey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "ab7d214b-9796-4249-abe9-92ee5178d64b",
+      "name": "Record feedback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -420,
+        420
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Header Auth (demo)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Receive feedback": {
+      "main": [
+        [
+          {
+            "node": "Build feedback email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build feedback email": {
+      "main": [
+        [
+          {
+            "node": "Send feedback email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Record feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

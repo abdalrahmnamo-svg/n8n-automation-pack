@@ -1,0 +1,31 @@
+{
+  "name": "n8n-automation-pack",
+  "version": "1.0.0",
+  "description": "Three n8n workflows (feedback email, approval revocation, schedule ingest) runnable locally against mock services.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "test": "node scripts/check-workflows.mjs && node --test \"test/**/*.test.js\"",
+    "check-workflows": "node scripts/check-workflows.mjs",
+    "mock:smtp": "node mock-services/smtp-catcher.mjs",
+    "mock:api": "node mock-services/mock-api.mjs",
+    "n8n": "npx --yes n8n@2.42.6 start",
+    "import": "node scripts/import-workflows.mjs",
+    "trigger:feedback": "node scripts/trigger-feedback.mjs",
+    "trigger:revocation": "node scripts/trigger-revocation.mjs",
+    "trigger:schedule": "node scripts/trigger-schedule.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.4",
+    "hono": "^4.13.13",
+    "mailparser": "^3.9.37",
+    "smtp-server": "^3.19.18"
+  },
+  "devDependencies": {
+    "nodemailer": "^10.0.16"
+  }
+}

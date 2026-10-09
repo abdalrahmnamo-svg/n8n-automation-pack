@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+node_modules/
+coverage/
+*.log
+/output/
+_import/
+.n8n/
+.vscode/*
+.idea/

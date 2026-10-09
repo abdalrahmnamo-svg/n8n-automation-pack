@@ -1,0 +1,151 @@
+{
+  "name": "Feedback Revocation",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Feedback Revocation\nSent when a mistaken approval is reversed: builds a disregard/apology email, sends it through the local SMTP catcher and records the revocation in the mock API (idempotent per conversation).",
+        "height": 200,
+        "width": 420
+      },
+      "id": "a86c88d8-3a23-4c21-9dcd-ff597215355d",
+      "name": "Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1020,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "8d44384e-80fb-4c08-86b8-4d8b160a9230",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "2be4ec66-3f6e-4c66-9d8d-556eba5ccce6",
+      "name": "Receive revocation",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1000,
+        300
+      ],
+      "webhookId": "8d44384e-80fb-4c08-86b8-4d8b160a9230",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Header Auth (demo)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Build the apology / disregard email for a revoked approval.\nconst b = $input.item.json.body || $input.item.json;\nif (!b.agentEmail) throw new Error('agentEmail is required');\nif (!b.conversationId) throw new Error('conversationId is required');\n\nconst agent = b.agent || 'Agent';\nconst contact = b.contact || 'the customer';\nconst date = b.date || '';\nconst conversationId = b.conversationId;\n\nlet finalEmailBody = String(b.finalEmailBody || '').trim();\nif (!finalEmailBody) {\n  const apology =\n    b.apologyNote ||\n    `Please disregard the quality feedback email regarding your interaction with ${contact}${date ? ` on ${date}` : ''}. That score was approved in error and has been removed from the system. Your performance numbers have been updated. We apologize for any confusion.`;\n  const scoreLine =\n    b.revokedScore != null ? `\\n\\nThe incorrect score (${b.revokedScore}/100) no longer appears on your record.` : '';\n  finalEmailBody = `Dear ${agent},\\n\\n${apology}${scoreLine}\\n\\nConversation reference: ${conversationId}\\nCustomer: ${contact}\\nCustomer Phone Number: ${b.phone || 'N/A'}\\nDate: ${date || 'N/A'}\\n\\nBest regards,\\nQA Team`;\n}\n\nreturn {\n  json: {\n    agent,\n    agentEmail: b.agentEmail,\n    conversationId,\n    contact,\n    phone: b.phone || '',\n    date,\n    revokedScore: b.revokedScore ?? null,\n    revokedBy: b.revokedBy || '',\n    feedbackType: 'revocation',\n    emailSubject: 'Please disregard - quality feedback sent in error',\n    finalEmailBody,\n    idempotencyKey: `revocation:${conversationId}`,\n    receivedAt: new Date().toISOString(),\n  },\n};\n"
+      },
+      "id": "e12b159b-fce1-4070-a416-fc9781a37cb9",
+      "name": "Build apology email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "qa-team@example.com",
+        "emailFormat": "text",
+        "options": {
+          "ccEmail": "qa-lead@example.com"
+        },
+        "toEmail": "={{ $json.agentEmail }}",
+        "subject": "={{ $json.emailSubject }}",
+        "text": "={{ $json.finalEmailBody }}"
+      },
+      "id": "5cfd99a8-e4a9-4497-bb4c-538fda2362bf",
+      "name": "Send revocation email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -420,
+        200
+      ],
+      "credentials": {
+        "smtp": {
+          "name": "SMTP (demo)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:4010/api/revocations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $json.idempotencyKey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "9d27e1e3-9beb-42a3-849e-17e8a38548c1",
+      "name": "Record revocation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -420,
+        420
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Header Auth (demo)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Receive revocation": {
+      "main": [
+        [
+          {
+            "node": "Build apology email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build apology email": {
+      "main": [
+        [
+          {
+            "node": "Send revocation email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Record revocation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

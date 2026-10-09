@@ -1,0 +1,147 @@
+{
+  "name": "Schedule Ingest",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Schedule Ingest\nA chat bot (or any client) posts a weekly roster to this Header-Auth webhook. The Code node parses free text into dated rows, the mock API validates and stores a draft, and a receipt email goes to the local SMTP catcher.",
+        "height": 200,
+        "width": 460
+      },
+      "id": "aa08aa23-4278-4715-8394-5d337ef2c1bd",
+      "name": "Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1020,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "83198b5c-f552-4997-bd08-d85c62764bbb",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "cb64360b-b748-4817-b4a8-718d22f2fbbc",
+      "name": "Receive roster",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1000,
+        300
+      ],
+      "webhookId": "83198b5c-f552-4997-bd08-d85c62764bbb",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Header Auth (demo)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Turn a free-text weekly roster into structured entries (or accept entries as given).\n// Text format:\n//   Week 2026-06-01\n//   Agent Alpha: Sun-Thu 09:00-16:00, Fri-Sat off\nconst b = $input.item.json.body || $input.item.json;\nconst DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];\nconst rawText = String(b.rawText || '');\nlet weekStart = b.weekStart || '';\nlet entries = Array.isArray(b.entries) ? b.entries : [];\nconst unparsed = [];\n\nconst addDays = (iso, n) => {\n  const d = new Date(`${iso}T00:00:00Z`);\n  d.setUTCDate(d.getUTCDate() + n);\n  return d.toISOString().slice(0, 10);\n};\n\nif (entries.length === 0 && rawText) {\n  const parsed = [];\n  for (const line of rawText.split(/\\r?\\n/)) {\n    const t = line.trim();\n    if (!t) continue;\n    const wk = t.match(/^week\\s+(\\d{4}-\\d{2}-\\d{2})$/i);\n    if (wk) {\n      weekStart = wk[1];\n      continue;\n    }\n    const m = t.match(/^([^:]+):\\s*(.+)$/);\n    if (!m || !weekStart) {\n      unparsed.push(t);\n      continue;\n    }\n    for (const part of m[2].split(',')) {\n      const p = part.trim().toLowerCase();\n      const mm = p.match(/^([a-z]{3})(?:\\s*-\\s*([a-z]{3}))?\\s+(?:(off)|(\\d{2}:\\d{2})\\s*-\\s*(\\d{2}:\\d{2}))$/);\n      const from = mm ? DAYS.indexOf(mm[1]) : -1;\n      const to = mm ? (mm[2] ? DAYS.indexOf(mm[2]) : from) : -1;\n      if (!mm || from < 0 || to < from) {\n        unparsed.push(`${m[1].trim()}: ${part.trim()}`);\n        continue;\n      }\n      for (let d = from; d <= to; d += 1) {\n        parsed.push(\n          mm[3]\n            ? { agent: m[1].trim(), date: addDays(weekStart, d), off: true }\n            : { agent: m[1].trim(), date: addDays(weekStart, d), start: mm[4], end: mm[5], off: false },\n        );\n      }\n    }\n  }\n  entries = parsed;\n}\n\nif (entries.length === 0) throw new Error('no schedule entries found');\n\nreturn { json: { weekStart, entries, rawText, unparsed } };\n"
+      },
+      "id": "bc6b5b54-9e43-4d44-b0b6-51aa64e23017",
+      "name": "Parse roster",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:4010/api/schedules/draft",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": false,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ weekStart: $json.weekStart, entries: $json.entries, rawText: $json.rawText, submittedVia: 'webhook' }) }}",
+        "options": {}
+      },
+      "id": "3dbb7e73-aa86-4263-b503-f3819e6ac8ca",
+      "name": "Submit schedule draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -440,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Header Auth (demo)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "qa-team@example.com",
+        "emailFormat": "text",
+        "options": {},
+        "toEmail": "ops-lead@example.com",
+        "subject": "=Schedule draft saved for week {{ $json.schedule.weekStart }}",
+        "text": "=Draft schedule saved for week {{ $json.schedule.weekStart }} ({{ $json.schedule.rows }} rows).\n{{ $json.validation.errors.length }} error(s), {{ $json.validation.warnings.length }} warning(s)."
+      },
+      "id": "5a64b15f-8076-41c2-81fb-dcef48bcb1a4",
+      "name": "Send draft receipt",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        -160,
+        300
+      ],
+      "credentials": {
+        "smtp": {
+          "name": "SMTP (demo)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Receive roster": {
+      "main": [
+        [
+          {
+            "node": "Parse roster",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse roster": {
+      "main": [
+        [
+          {
+            "node": "Submit schedule draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit schedule draft": {
+      "main": [
+        [
+          {
+            "node": "Send draft receipt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
