@@ -1,7 +1,8 @@
 /**
  * Workflow sanitizer check. Fails (exit 1) when an exported n8n workflow carries anything
  * that should never be published: instance/credential/file IDs, pinned execution data,
- * non-example emails, vendor-specific nodes, foreign hosts, or unauthenticated webhooks.
+ * non-example emails, vendor-specific nodes, foreign hosts, triggers other than a webhook or a schedule,
+ * or unauthenticated webhooks.
  *
  *   node scripts/check-workflows.mjs [dir-or-file ...] [--denylist <file>]
  *
@@ -46,6 +47,9 @@ const FORBIDDEN_TEXT = [
   'graph.microsoft',
   'api.telegram',
 ]
+
+// Triggers other than a (header-authenticated) webhook are forbidden, except a plain schedule.
+const ALLOWED_TRIGGER_TYPES = new Set(['n8n-nodes-base.webhook', 'n8n-nodes-base.scheduleTrigger'])
 
 const ALLOWED_HOSTS = new Set(['localhost', '127.0.0.1'])
 
@@ -123,8 +127,8 @@ export function checkWorkflow(wf, { name = 'workflow', extraTerms = [] } = {}) {
       if (!UUID_RE.test(n.webhookId || '')) fail('webhook-id', `${label} webhookId must be a UUID`)
       else if (n.webhookId !== n.parameters.path) fail('webhook-id', `${label} webhookId should equal path`)
     }
-    if (/trigger$/i.test(n.type || '') && n.type !== 'n8n-nodes-base.webhook') {
-      fail('trigger', `${label} is a non-webhook trigger (${n.type})`)
+    if (/trigger$/i.test(n.type || '') && !ALLOWED_TRIGGER_TYPES.has(n.type)) {
+      fail('trigger', `${label} is a trigger other than webhook/schedule (${n.type})`)
     }
   }
   return problems

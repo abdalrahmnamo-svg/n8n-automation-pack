@@ -77,3 +77,59 @@ describe('Parse roster (Code node)', () => {
     assert.throws(() => runCodeNode('schedule-ingest.json', 'Parse roster', { rawText: 'hello' }), /no schedule entries/)
   })
 })
+
+describe('Evaluate run (Code node, nightly pipeline)', () => {
+  const okRun = {
+    status: 'ok',
+    trigger: 'manual',
+    startedAt: '2026-06-08T02:00:00.000Z',
+    durationMs: 42200,
+    failedStep: null,
+    dbt: { pass: 158, warn: 7, error: 0 },
+    steps: [
+      { name: 'sync', status: 'ok', exitCode: 0, durationMs: 1200, outputTail: '' },
+      { name: 'dbt', status: 'ok', exitCode: 0, durationMs: 41000, outputTail: '' },
+    ],
+  }
+  const run = (body) => runCodeNode('nightly-data-pipeline.json', 'Evaluate run', body)
+
+  it('builds an OK summary', () => {
+    const out = run(okRun)
+    assert.equal(out.failed, false)
+    assert.equal(out.subject, 'Nightly data pipeline OK (dbt PASS=158, WARN=7)')
+    assert.match(out.text, /- dbt: ok \(exit 0, 41\.0s\)/)
+    assert.match(out.text, /dbt: PASS=158 WARN=7 ERROR=0/)
+    assert.equal(out.run.status, 'ok')
+    assert.equal(out.run.steps[0].outputTail, undefined)
+  })
+
+  it('flags a failed step with dbt counts and the last output', () => {
+    const out = run({
+      ...okRun,
+      status: 'failed',
+      failedStep: 'dbt',
+      dbt: { pass: 155, warn: 7, error: 3 },
+      steps: [okRun.steps[0], { name: 'dbt', status: 'failed', exitCode: 1, durationMs: 38000, outputTail: 'Failure in test not_null_x' }],
+    })
+    assert.equal(out.failed, true)
+    assert.equal(out.failedStep, 'dbt')
+    assert.equal(out.subject, 'Nightly data pipeline FAILED at dbt (dbt errors: 3)')
+    assert.match(out.text, /dbt: PASS=155 WARN=7 ERROR=3/)
+    assert.match(out.text, /Last output of dbt:\nFailure in test not_null_x/)
+  })
+
+  it('treats dbt errors > 0 as failed even when the status says ok', () => {
+    assert.equal(run({ ...okRun, dbt: { pass: 1, warn: 0, error: 1 } }).failed, true)
+  })
+
+  it('treats an unreachable runner (error item) as failed', () => {
+    const out = run({ error: { message: 'connect ECONNREFUSED 127.0.0.1:4020' } })
+    assert.equal(out.failed, true)
+    assert.equal(out.failedStep, 'runner')
+    assert.match(out.text, /did not return a result: connect ECONNREFUSED/)
+  })
+
+  it('treats a missing status as failed', () => {
+    assert.equal(run({ steps: [] }).failed, true)
+  })
+})

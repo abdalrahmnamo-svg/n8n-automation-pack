@@ -6,12 +6,12 @@ import { checkFiles, checkWorkflow } from '../scripts/check-workflows.mjs'
 import { loadWorkflow } from './helpers.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const FILES = ['qa-feedback-email.json', 'feedback-revocation.json', 'schedule-ingest.json']
+const FILES = ['qa-feedback-email.json', 'feedback-revocation.json', 'schedule-ingest.json', 'nightly-data-pipeline.json']
 
 describe('check-workflows', () => {
   it('passes on the shipped workflow JSON', () => {
     const { files, problems } = checkFiles([join(root, 'workflows')])
-    assert.equal(files.length, 3)
+    assert.equal(files.length, 4)
     assert.deepEqual(problems, [])
   })
 
@@ -67,6 +67,15 @@ describe('check-workflows', () => {
     assert.ok(hits(problems, 'trigger'))
   })
 
+  it('allows a schedule trigger but still forbids other non-webhook triggers', () => {
+    const schedule = { id: crypto.randomUUID(), name: 'Nightly', type: 'n8n-nodes-base.scheduleTrigger' }
+    assert.deepEqual(mutate((wf) => wf.nodes.push(schedule)), [])
+    for (const type of ['n8n-nodes-base.cronTrigger', 'n8n-nodes-base.emailReadImapTrigger', 'n8n-nodes-base.manualTrigger']) {
+      const problems = mutate((wf) => wf.nodes.push({ id: crypto.randomUUID(), name: 'T', type }))
+      assert.ok(hits(problems, 'trigger'), type)
+    }
+  })
+
   it('fails when a webhook lacks header auth or has a non-UUID path', () => {
     const noAuth = mutate((wf) => {
       wf.nodes.find((n) => n.type.endsWith('webhook')).parameters.authentication = 'none'
@@ -93,6 +102,6 @@ describe('check-workflows', () => {
           return n.parameters.path
         }),
     )
-    assert.equal(new Set(paths).size, 3)
+    assert.equal(new Set(paths).size, 4)
   })
 })

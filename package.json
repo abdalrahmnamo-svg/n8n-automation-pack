@@ -1,7 +1,7 @@
 {
   "name": "n8n-automation-pack",
   "version": "1.0.0",
-  "description": "Three n8n workflows (feedback email, approval revocation, schedule ingest) runnable locally against mock services.",
+  "description": "Four n8n workflows (feedback email, approval revocation, schedule ingest, nightly data pipeline) runnable locally against mock services.",
   "type": "module",
   "private": true,
   "license": "MIT",
@@ -13,11 +13,14 @@
     "check-workflows": "node scripts/check-workflows.mjs",
     "mock:smtp": "node mock-services/smtp-catcher.mjs",
     "mock:api": "node mock-services/mock-api.mjs",
+    "mock:pipeline": "node mock-services/pipeline-runner.mjs",
+    "mock:pipeline:fake": "node mock-services/pipeline-runner.mjs --fake",
     "n8n": "npx --yes n8n@2.42.6 start",
     "import": "node scripts/import-workflows.mjs",
     "trigger:feedback": "node scripts/trigger-feedback.mjs",
     "trigger:revocation": "node scripts/trigger-revocation.mjs",
-    "trigger:schedule": "node scripts/trigger-schedule.mjs"
+    "trigger:schedule": "node scripts/trigger-schedule.mjs",
+    "trigger:pipeline": "node scripts/trigger-pipeline.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.4",

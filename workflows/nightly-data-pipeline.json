@@ -1,0 +1,314 @@
+{
+  "name": "Nightly Data Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Nightly Data Pipeline\nRuns at 02:00 daily, or on demand through the Header-Auth webhook. One HTTP call to the local pipeline runner executes the sync and dbt build steps; the Code node decides OK vs FAILED from the exit codes and the dbt PASS/WARN/ERROR counts, an email goes to the SMTP catcher, and the run is recorded in the mock API. A runner is used because n8n 2.x disables the Execute Command node by default.",
+        "height": 220,
+        "width": 520
+      },
+      "id": "3c20ba3f-ff53-48fc-b1ae-7452060ff5a6",
+      "name": "Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1000,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 2,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "e215d112-be26-4e8e-9feb-bd22076f6236",
+      "name": "Every night 02:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -980,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bff44390-1bb6-4569-8f7a-40b19dd68935",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "a0742cf9-0687-4304-bce9-cff8310b9258",
+      "name": "Run on demand",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -980,
+        460
+      ],
+      "webhookId": "bff44390-1bb6-4569-8f7a-40b19dd68935",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Header Auth (demo)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:4020/run",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": false,
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ trigger: $json.body ? 'manual' : 'schedule', scenario: ($json.body && $json.body.scenario) || undefined }) }}",
+        "options": {
+          "timeout": 900000
+        }
+      },
+      "id": "00e8fbd4-cecf-415d-9ef4-a1f76c2e7b92",
+      "name": "Run pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -700,
+        360
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Header Auth (demo)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Decide whether the pipeline run failed and build the alert / summary email.\n// Input: the runner's JSON ({status, steps[], dbt, failedStep, startedAt, durationMs, trigger}),\n// or an error item when the runner was unreachable.\nconst r = $input.item.json.body || $input.item.json;\nconst runnerError = r.error ? (r.error.message || String(r.error)) : null;\nconst steps = Array.isArray(r.steps) ? r.steps : [];\nconst dbt = r.dbt || null;\nconst failedRow = steps.find((s) => s.status === 'failed');\nconst failedStep = r.failedStep || (failedRow ? failedRow.name : null) || (runnerError ? 'runner' : null);\nconst failed = Boolean(runnerError) || r.status !== 'ok' || (dbt !== null && Number(dbt.error) > 0);\nconst secs = (ms) => (Number(ms || 0) / 1000).toFixed(1) + 's';\nconst dbtLine = dbt ? 'dbt: PASS=' + dbt.pass + ' WARN=' + dbt.warn + ' ERROR=' + dbt.error : 'dbt: no summary line found';\nconst stepLines = steps.map((s) => '- ' + s.name + ': ' + s.status + (s.exitCode === null || s.exitCode === undefined ? '' : ' (exit ' + s.exitCode + ', ' + secs(s.durationMs) + ')'));\n\nconst lines = [];\nif (runnerError) lines.push('The pipeline runner did not return a result: ' + runnerError);\nlines.push('Started: ' + (r.startedAt || 'unknown'));\nlines.push('Trigger: ' + (r.trigger || 'unknown'));\nlines.push('Duration: ' + secs(r.durationMs));\nlines.push('');\nlines.push(...stepLines);\nlines.push(dbtLine);\nif (failed && failedRow && failedRow.outputTail) {\n  lines.push('');\n  lines.push('Last output of ' + failedRow.name + ':');\n  lines.push(failedRow.outputTail);\n}\n\nconst subject = failed\n  ? 'Nightly data pipeline FAILED' + (failedStep ? ' at ' + failedStep : '') + (dbt ? ' (dbt errors: ' + dbt.error + ')' : '')\n  : 'Nightly data pipeline OK (dbt PASS=' + (dbt ? dbt.pass : '?') + ', WARN=' + (dbt ? dbt.warn : '?') + ')';\n\nreturn {\n  json: {\n    failed,\n    failedStep,\n    subject,\n    text: lines.join('\\n'),\n    run: {\n      status: failed ? 'failed' : 'ok',\n      startedAt: r.startedAt || new Date().toISOString(),\n      durationMs: Number(r.durationMs || 0),\n      failedStep,\n      trigger: r.trigger || 'unknown',\n      dbt,\n      steps: steps.map((s) => ({ name: s.name, status: s.status, exitCode: s.exitCode, durationMs: s.durationMs })),\n    },\n  },\n};\n"
+      },
+      "id": "bdd43467-dee2-4ebe-8fa4-5c80fd272797",
+      "name": "Evaluate run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -440,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "438afa48-b046-4422-afd1-94f417e3a71b",
+              "leftValue": "={{ $json.failed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3ea70a8a-7aa2-44d8-8616-12a58176f056",
+      "name": "Run failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -200,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "data-ops@example.com",
+        "emailFormat": "text",
+        "options": {},
+        "toEmail": "data-team@example.com",
+        "subject": "={{ $json.subject }}",
+        "text": "={{ $json.text }}"
+      },
+      "id": "9669b113-1c21-4946-83d8-a3cbb83771ae",
+      "name": "Send pipeline FAILED",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        60,
+        260
+      ],
+      "credentials": {
+        "smtp": {
+          "name": "SMTP (demo)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "data-ops@example.com",
+        "emailFormat": "text",
+        "options": {},
+        "toEmail": "data-team@example.com",
+        "subject": "={{ $json.subject }}",
+        "text": "={{ $json.text }}"
+      },
+      "id": "58ca823a-5100-46d3-b6ea-912562289ad9",
+      "name": "Send pipeline OK",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        60,
+        460
+      ],
+      "credentials": {
+        "smtp": {
+          "name": "SMTP (demo)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:4010/api/pipeline-runs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ 'pipeline:' + $('Evaluate run').item.json.run.startedAt }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Evaluate run').item.json.run) }}",
+        "options": {}
+      },
+      "id": "4ef7c55f-e0a7-40ea-87b5-cdbd3e538b6f",
+      "name": "Record pipeline run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        340,
+        360
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Header Auth (demo)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every night 02:00": {
+      "main": [
+        [
+          {
+            "node": "Run pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run on demand": {
+      "main": [
+        [
+          {
+            "node": "Run pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run pipeline": {
+      "main": [
+        [
+          {
+            "node": "Evaluate run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate run": {
+      "main": [
+        [
+          {
+            "node": "Run failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run failed?": {
+      "main": [
+        [
+          {
+            "node": "Send pipeline FAILED",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send pipeline OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send pipeline FAILED": {
+      "main": [
+        [
+          {
+            "node": "Record pipeline run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send pipeline OK": {
+      "main": [
+        [
+          {
+            "node": "Record pipeline run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

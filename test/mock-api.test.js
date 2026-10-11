@@ -14,7 +14,7 @@ describe('mock API auth', () => {
   const app = createApp({ secret: SECRET })
 
   it('rejects requests without the header secret', async () => {
-    for (const path of ['/api/feedback-records', '/api/revocations', '/api/schedules/draft']) {
+    for (const path of ['/api/feedback-records', '/api/revocations', '/api/schedules/draft', '/api/pipeline-runs']) {
       const res = await app.request(path, json({ conversationId: 'c', agentEmail: 'a@example.com' }))
       assert.equal(res.status, 401, path)
     }
@@ -73,5 +73,21 @@ describe('mock API records', () => {
     const out = await (await app.request('/api/schedules/draft', json(bad, auth))).json()
     assert.equal(out.saved, false)
     assert.match(out.validation.errors[0], /outside team window/)
+  })
+})
+
+describe('mock API pipeline runs', () => {
+  it('records a run, dedupes on the idempotency key and lists it', async () => {
+    const app = createApp({ secret: SECRET })
+    const run = { status: 'failed', startedAt: '2026-06-08T02:00:00.000Z', dbt: { pass: 155, warn: 7, error: 3 } }
+    const headers = { ...auth, 'idempotency-key': 'pipeline:2026-06-08T02:00:00.000Z' }
+    const r1 = await app.request('/api/pipeline-runs', json(run, headers))
+    const r2 = await app.request('/api/pipeline-runs', json(run, headers))
+    assert.equal(r1.status, 201)
+    assert.equal((await r2.json()).duplicate, true)
+    assert.equal((await app.request('/api/pipeline-runs', json({ status: 'ok' }, auth))).status, 400)
+    const all = await (await app.request('/api/records', { headers: auth })).json()
+    assert.equal(all.pipelineRuns.length, 1)
+    assert.equal(all.pipelineRuns[0].dbt.error, 3)
   })
 })

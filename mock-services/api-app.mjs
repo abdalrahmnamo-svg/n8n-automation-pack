@@ -41,7 +41,7 @@ export function validateSchedule({ weekStart, entries }) {
 
 export function createApp({ secret }) {
   const app = new Hono()
-  const db = { feedback: [], revocations: [], schedules: new Map() }
+  const db = { feedback: [], revocations: [], pipelineRuns: [], schedules: new Map() }
   const byKey = new Map() // idempotency-key -> stored record
 
   app.get('/health', (c) => c.json({ ok: true }))
@@ -77,6 +77,7 @@ export function createApp({ secret }) {
 
   app.post('/api/feedback-records', createRecord('feedback', ['conversationId', 'agentEmail']))
   app.post('/api/revocations', createRecord('revocations', ['conversationId', 'agentEmail']))
+  app.post('/api/pipeline-runs', createRecord('pipelineRuns', ['status', 'startedAt']))
 
   app.post('/api/schedules/draft', async (c) => {
     let body
@@ -97,6 +98,7 @@ export function createApp({ secret }) {
     c.json({
       feedback: db.feedback,
       revocations: db.revocations,
+      pipelineRuns: db.pipelineRuns,
       schedules: [...db.schedules.values()],
     }),
   )
